@@ -43,7 +43,7 @@ letter.
 * "SysLog":
 	Default false.  Logs DHCP requests to System Logger.
 
-* :FileLog":
+* "FileLog":
 	Defines file to log DHCP requests to.  If empty does nothing.
 
 * "NICs":
