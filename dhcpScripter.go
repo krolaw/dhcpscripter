@@ -1,7 +1,5 @@
 package main
 
-// sudo iptables -I PREROUTING -t nat -p udp -s 0.0.0.0 --sport 68 -d 0.0.0.0 --dport 67 -j DNAT --to 0.0.0.0:6767
-// sudo ipfw add 100 fwd 0.0.0.0,6767 udp from 0.0.0.0 to 0.0.0.0 67 in (untested)
 import (
 	"encoding/json"
 	"errors"
@@ -13,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,7 +27,7 @@ type config struct {
 	Port    int
 	SysLog  bool
 	FileLog string
-	NICs    map[string]NIC // [nic][]command
+	NICs    map[string]NIC // Commands
 	/*XMPPServer   string
 	XMPPLogin    string
 	XMPPPassword string
@@ -131,7 +130,6 @@ func main() {
 	}
 
 	buffer := make([]byte, 1500)
-
 	currentlyExecuting := make(map[string]bool, 1)
 
 	for {
@@ -182,18 +180,10 @@ func main() {
 		}
 
 		if nic.Cmd != nil && currentlyExecuting[nicAddr] == false {
-			//fmt.Println(command)
 			currentlyExecuting[nicAddr] = true
 			cmd := append([]string{}, nic.Cmd...)
 			for i, v := range cmd {
-				switch v {
-				case "%h":
-					cmd[i] = hostname
-				case "%a":
-					cmd[i] = nicAddr
-				case "%n":
-					cmd[i] = nic.Name
-				}
+				cmd[i] = strings.Replace(strings.Replace(v, "%hostname", hostname, -1), "%nic", nicAddr, -1)
 			}
 			go func(nicAddr string, cmd []string) { // Run in background
 				if result, err := exec.Command(cmd[0], cmd[1:]...).Output(); err != nil {
