@@ -55,8 +55,7 @@ The configuration file uses [JSON](http://www.json.org) format.  Parameters that
 	Optional Name, recorded in logs.
 
 * "Cmd":
-	Optional command to run when device connects.  Note that the format of the command is an array and that each
-	parameter of the command is a separate value.  See config below.
+	Optional command to run when device connects.  Note that the format of the command is an array and that each parameter of the command is a separate value.  If _%nic_ or _%hostname_ is included, they will be replaced by their respective values from the DHCP packet.
 
 ### Example Config
 
