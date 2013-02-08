@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log/syslog"
 	"net"
@@ -16,11 +15,18 @@ import (
 )
 
 const (
+	// Message Types we are interested in
+	DHCPDiscover = 1
+
 	// DHCP Options
-	HostName = 12
+	DHCPMessageType = 53
+	HostName        = 12
 
 	// Default DHCP Port
 	DHCPUDPPort = 67
+
+	// Duplicate Packet Timeout
+	DuplicatePacketTimeout = 20 * time.Second
 )
 
 type config struct {
@@ -106,7 +112,7 @@ func main() {
 	// Read Config File
 	data, err := ioutil.ReadFile(*configFile)
 	if err != nil {
-		fmt.Println("Error:", err)
+		os.Stderr.WriteString("Error: " + err.Error())
 		return
 	}
 
@@ -114,22 +120,31 @@ func main() {
 
 	// Load data into config struct
 	if err := json.Unmarshal(data, config); err != nil {
-		fmt.Println("Error:", err)
+		os.Stderr.WriteString("Error:" + err.Error())
 		return
 	}
 
-	if config.Port < 1 {
+	if config.Port < 1 { // If not specified will be zero, so use default port
 		config.Port = DHCPUDPPort
 	}
 
 	// Listen
 	conn, err := net.ListenPacket("udp", ":"+strconv.Itoa(config.Port))
 	if err != nil {
-		fmt.Println("Error:", err)
+		os.Stderr.WriteString("Error:" + err.Error())
 		return
 	}
 
+	// Make all NICs lower case so matching works
+	for k, v := range config.NICs {
+		delete(config.NICs, k)
+		config.NICs[strings.ToLower(k)] = v
+	}
+
 	buffer := make([]byte, 1500)
+
+	lastFire := make(map[string]time.Time, 1) // Some devices send multiple packets in a row
+
 	currentlyExecuting := make(map[string]bool, 1)
 
 	for {
@@ -143,12 +158,31 @@ func main() {
 			continue
 		}
 		nicAddr := dhcpPacket.CHAddr.String()
+
+		now := time.Now()
+		expire := now.Add(-DuplicatePacketTimeout)
+		for i, t := range lastFire {
+			if t.Before(expire) {
+				delete(lastFire, i)
+			}
+		}
+
+		if _, ok := lastFire[nicAddr]; ok { // Filter duplicate packet
+			continue
+		}
+
 		nic, ok := config.NICs[nicAddr]
 		if !ok {
 			nic = config.NICs["default"]
 		}
 
-		hostname := string(dhcpPacket.DecodeOptions()[HostName])
+		options := dhcpPacket.DecodeOptions()
+
+		if msgType := options[DHCPMessageType]; len(msgType) != 1 || msgType[0] != DHCPDiscover {
+			continue
+		}
+
+		hostname := string(options[HostName])
 		if hostname == "" {
 			hostname = "*"
 		}
@@ -156,11 +190,11 @@ func main() {
 		if (nic.SysLog != nil && *nic.SysLog == true) || (nic.SysLog == nil && config.SysLog == true) {
 			if w, err := syslog.New(syslog.LOG_NOTICE, "DHCPScripter"); err == nil {
 				if err = w.Notice(nicAddr + " (" + hostname + ") " + nic.Name + " Connected"); err != nil {
-					os.Stderr.WriteString("Could not write to SysLog: " + err.Error())
+					os.Stderr.WriteString("Could not write to SysLog: " + err.Error() + "\n")
 				}
 				w.Close()
 			} else {
-				fmt.Errorf("Could not connect to SysLog: %s", err)
+				os.Stderr.WriteString("Could not connect to SysLog: " + err.Error() + "\n")
 			}
 		}
 
@@ -173,9 +207,9 @@ func main() {
 		if logFile != "" {
 			file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 			if err != nil {
-				fmt.Errorf("Error opening %s for writing: %s", logFile, err)
+				os.Stderr.WriteString("Error opening " + logFile + " for writing: " + err.Error() + "\n")
 			}
-			file.WriteString(time.Now().Format("2006-01-02 15:04:05") + " - " + nicAddr + " (" + hostname + ") " + nic.Name + " Connected")
+			file.WriteString(now.Format("2006-01-02 15:04:05") + " - " + nicAddr + " (" + hostname + ") " + nic.Name + " Connected\n")
 			file.Close()
 		}
 
@@ -187,11 +221,10 @@ func main() {
 			}
 			go func(nicAddr string, cmd []string) { // Run in background
 				if result, err := exec.Command(cmd[0], cmd[1:]...).Output(); err != nil {
-					fmt.Println(err)
+					os.Stderr.WriteString("Error:" + err.Error())
 				} else if len(result) > 0 {
-					fmt.Print(string(result))
+					os.Stdout.Write(result)
 				}
-				time.Sleep(10 * time.Second)
 				delete(currentlyExecuting, nicAddr)
 			}(nicAddr, cmd)
 		}

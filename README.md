@@ -10,15 +10,13 @@ Trouble was, both home and work dhcp services were embedded on ADSL routers, so 
 
 ## Introduction
 
-DHCP Scripter (DS) brings music intro themes to the masses.  It doesn't take the place of your dhcp server.  DS just listens for the DHCP request of the newly entered device/phone, extracts the nic, and executes the command from its config file.  Because, DHCP requests are broadcast to every computer on the network, DS can be run on any machine, or multiple machines :-).  You don't need to touch the server :-)
+DHCP Scripter (DS) brings music intro themes to the masses.  It doesn't take the place of your dhcp server.  DS just listens for the DHCP Discovery packet of the newly entered device/phone, extracts the nic, and executes the command from its config file.  Because, DHCP requests are broadcast to every computer on the network, DS can be run on any machine, or multiple machines :-).  You don't need to touch the server :-)
 
 You will however need administrator rights to the machine you are running DS on, as it needs to listen on port 67.  (Ports lower than 1024 usually require administrator privileges.)
 
 ## Caveats
 
-Your DHCP server should have a longer lease time than you expect anyone to stay.  For example, a DHCP server with a lease period of 1 hour, requires devices to check in at least once per hour to remain connected.  Therefore, anyone staying longer than an hour, will cause DS to have a false positive.  A lease time of one day is recommended.
-
-Apple iOS devices' DHCP handling is broken in several versions and can cause DS to fire every few minutes.  It's not so bad with later versions of iOS.  Princeton University has produced an [interesting document](http://www.net.princeton.edu/apple-ios/ios40-requests-DHCP-too-often.html) detailing Apple's inability to solve the problem correctly.  Other devices such as Android appear to work flawlessly.
+DS only listens for discovery packets, used when a device requires a brand new lease.  It ignores request packets, which are used to renew leases, avoiding false positives for networks with short lease times.  However, this means if a device leaves a network and returns before the lease expires, it may skip discovery, and therefore DS will not fire.
 
 ## Configuration
 
@@ -31,7 +29,7 @@ The configuration file uses [JSON](http://www.json.org) format.  Parameters that
 
 * "Port":
 	Default 67.  This allows DS to run as an unprivileged user.  However, it only works if the DHCP packets are re-routed to your chosen Port:
-	* Linux: sudo iptables -I PREROUTING -t nat -p udp -s 0.0.0.0 --sport 68 -d 0.0.0.0 --dport 67 -j DNAT --to 0.0.0.0:6767
+	* Linux: sudo iptables -t nat -A PREROUTING -p udp -s 0.0.0.0 --sport 68 --dport 67 -j DNAT --to 0.0.0.0:6767
 	* Mac (untested): sudo ipfw add 100 fwd 0.0.0.0,6767 udp from 0.0.0.0 to 0.0.0.0 67 in
 
 * "SysLog":
@@ -46,7 +44,7 @@ The configuration file uses [JSON](http://www.json.org) format.  Parameters that
 ### NIC Object Parameters
 
 * "SysLog":
-	Default inherit.  Overrides Top Level SysLog behaviour for this nic.
+	Default inherit.  Overrides Top Level SysLog behaviour for this nic. NULL is permitted.
 	
 * "FileLog":
 	Default inherit.  Overrides Top Level FileLog behaviour for this nic. NULL is permitted.
